@@ -1,0 +1,115 @@
+// src/server/rock-service.ts
+export interface RockPerson {
+    Id: number;
+    FirstName: string;
+    LastName: string;
+    Email: string;
+    AttributeValues?: { [key: string]: { Value: string | number | boolean } };
+}
+
+// Updated Env type
+export interface Env {
+    // DB: D1Database; // Removed
+    ROCK_API_URL: string;
+    ROCK_API_KEY: string;
+    ROCK_PERSON_ATTRIBUTE_KEY: string;
+    ROCK_PERSON_ATTRIBUTE_VALUE: string;
+}
+
+async function rockFetch(env: Env, path: string, options: RequestInit = {}): Promise<Response> {
+    const url = `${env.ROCK_API_URL.replace(/\/$/, '')}/${path.replace(/^\//, '')}`;
+    const headers = {
+        'Authorization-Token': env.ROCK_API_KEY,
+        'Content-Type': 'application/json',
+        ...options.headers,
+    };
+    console.log(env.ROCK_API_KEY, env.ROCK_API_URL)
+    return fetch(url, { ...options, headers });
+}
+
+export async function findPersonInRock(env: Env, firstName: string, lastName: string, email: string): Promise<RockPerson | null> {
+    let filter = `Email eq '${email.replace(/'/g, "''")}'`;
+    if (!email && firstName && lastName) {
+        filter = `FirstName eq '${firstName.replace(/'/g, "''")}' and LastName eq '${lastName.replace(/'/g, "''")}'`;
+    } else if (!email) { // if only email is blank and no names, this won't find much
+        return null;
+    }
+    // Consider a more robust search if needed, e.g., checking all three fields
+    filter = `(Email eq '${email.replace(/'/g, "''")}') and (FirstName eq '${firstName.replace(/'/g, "''")}') and (LastName eq '${lastName.replace(/'/g, "''")}')`
+
+    const response = await rockFetch(env, `People?$filter=${encodeURIComponent(filter)}`);
+
+    if (!response.ok) {
+        console.error(`Rock API Error (findPerson): ${response.status} ${await response.text()}`);
+        throw new Error(`Rock API Error (findPerson): ${response.status}`);
+    }
+    const people: RockPerson[] = await response.json();
+    return people.length > 0 ? people[0] : null;
+}
+
+// export async function createPersonInRock(env: Env, firstName: string, lastName: string, email: string): Promise<RockPerson> {
+//     const personData: Partial<RockPerson> & { RecordStatusValueId?: number, ConnectionStatusValueId?: number } = {
+//         FirstName: firstName,
+//         LastName: lastName,
+//         Email: email,
+//         RecordStatusValueId: 1, // Active
+//         IsEmailActive: true,
+//         EmailPreference: 0, // EmailAllowed
+//         // ConnectionStatusValueId: 55, // Example: Web Prospect
+//         AttributeValues: {
+//             [env.ROCK_PERSON_ATTRIBUTE_KEY]: { Value: env.ROCK_PERSON_ATTRIBUTE_VALUE }
+//         }
+//     };
+
+//     const response = await rockFetch(env, 'People', {
+//         method: 'POST',
+//         body: JSON.stringify(personData)
+//     });
+
+//     if (response.status === 201 || response.status === 200) {
+//         const responseText = await response.text();
+//         let newPersonId: number;
+//         try {
+//             newPersonId = parseInt(responseText, 10);
+//             if (isNaN(newPersonId)) {
+//                  const jsonResponse = JSON.parse(responseText);
+//                  newPersonId = jsonResponse.Id || jsonResponse.id;
+//             }
+//         } catch (e) {
+//             throw new Error('Failed to parse ID from Rock person creation response.');
+//         }
+        
+//         if (!newPersonId || isNaN(newPersonId)) {
+//              throw new Error('No ID returned from Rock person creation.');
+//         }
+
+//         const getResponse = await rockFetch(env, `People/${newPersonId}`);
+//         if (!getResponse.ok) {
+//             console.error(`Rock API Error (fetch created Person): ${getResponse.status} ${await getResponse.text()}`);
+//             throw new Error('Failed to fetch newly created person from Rock.');
+//         }
+//         return await getResponse.json();
+//     } else {
+//         const errorBody = await response.text();
+//         console.error(`Rock API Error (createPerson): ${response.status} ${errorBody}`);
+//         throw new Error(`Rock API Error (createPerson): ${response.status} - ${errorBody}`);
+//     }
+// }
+
+export async function updatePersonAttributeInRock(env: Env, personId: number): Promise<void> {
+    const personUpdateData = {
+        AttributeValues: {
+            [env.ROCK_PERSON_ATTRIBUTE_KEY]: { Value: env.ROCK_PERSON_ATTRIBUTE_VALUE }
+        }
+    };
+    const response = await rockFetch(env, `People/${personId}`, {
+        method: 'PATCH',
+        body: JSON.stringify(personUpdateData)
+    });
+
+    if (!response.ok) {
+        const errorBody = await response.text();
+        console.error(`Rock API Error (updatePersonAttribute): ${response.status} ${errorBody}`);
+        throw new Error(`Rock API Error (updatePersonAttribute): ${response.status} - ${errorBody}`);
+    }
+}
