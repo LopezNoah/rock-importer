@@ -1,84 +1,88 @@
 // src/server/api.ts
 import { Hono } from 'hono';
-import { stream } from 'hono/streaming'; // For potentially large table rendering
-import { jsxRenderer } from 'hono/jsx-renderer'; // If using Hono's JSX for HTML templating
+// Removed unused imports: stream, jsxRenderer
 import type { Env } from './rock-service';
-import { findPersonInRock, updatePersonAttributeInRock } from './rock-service';
+import { findPersonInRock, updatePersonAttributeInRock /* createPersonInRock */ } from './rock-service'; // Assuming createPersonInRock might be used later
 
-// Basic CSV parser (server-side)
+// CSV Row Data interface remains the same
 interface CsvRowData {
     id: string; // Unique ID for HTMX targeting
     firstName: string;
     lastName: string;
     email: string;
 }
-function parseCSVText(csvText: string): CsvRowData[] {
+
+// Updated parseCSVText to accept dynamic header keys
+function parseCSVText(
+    csvText: string,
+    firstNameHeaderKey: string,
+    lastNameHeaderKey: string,
+    emailHeaderKey: string
+): CsvRowData[] {
     const lines = csvText.trim().split(/\r?\n/);
     if (lines.length < 2) return [];
-    const headerLine = lines[0].toLowerCase();
-    const headers = headerLine.split(',').map(h => h.trim());
-    
-    // Expecting "first_name", "last_name", "email" from your previous example
-    const firstNameIndex = headers.indexOf('first_name');
-    const lastNameIndex = headers.indexOf('last_name');
-    const emailIndex = headers.indexOf('email');
 
-    if (firstNameIndex === -1 || lastNameIndex === -1 || emailIndex === -1) {
-        // Instead of alert, throw an error or return an error message in HTML
-        throw new Error('CSV must contain columns: first_name, last_name, email');
+    const csvHeaders = lines[0].split(',').map(h => h.trim());
+    
+    const findHeaderIndex = (key: string, availableHeaders: string[]) => {
+        const lowerKey = key.toLowerCase();
+        return availableHeaders.findIndex(h => h.toLowerCase() === lowerKey);
+    };
+
+    const firstNameIndex = findHeaderIndex(firstNameHeaderKey, csvHeaders);
+    const lastNameIndex = findHeaderIndex(lastNameHeaderKey, csvHeaders);
+    const emailIndex = findHeaderIndex(emailHeaderKey, csvHeaders);
+
+    const missingHeaders: string[] = [];
+    if (firstNameIndex === -1) missingHeaders.push(firstNameHeaderKey);
+    if (lastNameIndex === -1) missingHeaders.push(lastNameHeaderKey);
+    if (emailIndex === -1) missingHeaders.push(emailHeaderKey);
+
+    if (missingHeaders.length > 0) {
+        throw new Error(`CSV header(s) not found: '${missingHeaders.join("', '")}'. Available headers: ${csvHeaders.join(', ')}`);
     }
 
     return lines.slice(1).map((line, index) => {
-        const values = line.split(',').map(v => v.trim().replace(/^"|"$/g, ''));
+        const values = line.split(',').map(v => v.trim().replace(/^"|"$/g, '')); // Remove surrounding quotes
         return {
             id: `row-${index}-${Date.now()}`, // Simple unique ID
             firstName: values[firstNameIndex] || '',
             lastName: values[lastNameIndex] || '',
             email: values[emailIndex] || ''
         };
-    }).filter(p => p.firstName && p.lastName && p.email);
+    }).filter(p => p.firstName && p.lastName && p.email); // Basic validation: ensure essential fields are present
 }
 
 
 const app = new Hono<{ Bindings: Env }>();
 
-// Simple HTML renderer middleware (or use Hono's built-in JSX renderer)
-const Layout = (props: { title: string; children?: any }) => (
-    <html>
-        <head>
-            <meta charSet="UTF-8" />
-            <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-            <title>{props.title}</title>
-            <script src="https://unpkg.com/htmx.org@1.9.10" integrity="sha384-D1Kt99CQMDuVetoL1lrYwg5t+9QdHe7NLX/SoJYkXDFfX37iInKRy5xLSi8nO7UC" crossOrigin="anonymous"></script>
-            <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet" /> {/* Or your project's CSS */}
-            <style>{`
-                .htmx-settling tr { opacity: 0.5; transition: opacity 300ms ease-out; }
-                .sticky-header th { position: sticky; top: 0; z-index: 10; background-color: #f3f4f6 /* bg-gray-100 */; }
-            `}</style>
-        </head>
-        <body class="bg-gray-50 p-4">
-            {props.children}
-            <script>
-              {/* Intersection Observer Logic will go here (or in a separate script tag) */}
-            </script>
-        </body>
-    </html>
-);
-
+// The Layout component previously here was not used by HTMX partials and can be removed.
+// HTMX partials are injected into the main page which already has its own layout.
 
 // Endpoint to render the initial table from CSV
 app.post('/upload-table', async (c) => {
     try {
         const formData = await c.req.formData();
         const file = formData.get('csvFile') as File;
+
+        // Get header keys from form data, with defaults (though UI now makes them required)
+        const firstNameHeader = (formData.get('firstNameHeader') as string || 'first_name').trim();
+        const lastNameHeader = (formData.get('lastNameHeader') as string || 'last_name').trim();
+        const emailHeader = (formData.get('emailHeader') as string || 'email').trim();
+
         if (!file || typeof file === 'string') {
-            return c.html(<div class="text-red-500 p-2">CSV file is required</div>, 400);
+            return c.html(<div class="text-red-500 p-2">CSV file is required.</div>, 400);
         }
+        // Basic check, though UI should enforce this
+        if (!firstNameHeader || !lastNameHeader || !emailHeader) {
+            return c.html(<div class="text-red-500 p-2">CSV header keys for First Name, Last Name, and Email are required.</div>, 400);
+        }
+
         const csvText = await file.text();
-        const records = parseCSVText(csvText);
+        const records = parseCSVText(csvText, firstNameHeader, lastNameHeader, emailHeader);
 
         if (records.length === 0) {
-            return c.html(<div class="text-yellow-500 p-2">No valid records found in CSV.</div>);
+            return c.html(<div class="text-yellow-500 p-2">No valid records found in CSV, or headers did not match. Please check column names and file content.</div>);
         }
 
         const tableHtml = (
@@ -109,15 +113,14 @@ app.post('/upload-table', async (c) => {
                                           <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                                         </svg>
                                     </span>
-                                
                                 </td>
                                 <td class="py-2 px-3 border-b">
                                     <button 
                                         class="px-3 py-1 bg-green-500 text-white text-sm rounded hover:bg-green-600 disabled:bg-gray-400"
                                         hx-post="/api/process-rock-record-htmx"
                                         hx-vals={`{ "id": "${record.id}", "firstName": "${record.firstName}", "lastName": "${record.lastName}", "email": "${record.email}" }`}
-                                        hx-target={`#${record.id}`} // Target the whole row
-                                        hx-swap="outerHTML" // Replace the whole row with server response
+                                        hx-target={`#${record.id}`}
+                                        hx-swap="outerHTML"
                                     >
                                         Import
                                     </button>
@@ -133,7 +136,11 @@ app.post('/upload-table', async (c) => {
 
     } catch (e: any) {
         console.error("Error uploading/parsing CSV:", e);
-        return c.html(<div class="text-red-500 p-2">Error processing CSV: {e.message}</div>, 500);
+        // Provide a more user-friendly error message to the client
+        const errorMessage = e.message.includes("CSV header(s) not found") 
+                             ? e.message 
+                             : "Error processing CSV file. Please ensure it is valid and try again.";
+        return c.html(<div class="text-red-500 p-2">{errorMessage}</div>, e.message.includes("CSV header(s) not found") ? 400 : 500);
     }
 });
 
@@ -145,8 +152,6 @@ app.get('/check-row-status', async (c) => {
     }
 
     try {
-        // Add a small artificial delay to simulate network and see loading spinners
-        // await new Promise(resolve => setTimeout(resolve, Math.random() * 1000 + 500));
         const person = await findPersonInRock(c.env, firstName, lastName, email);
         if (person) {
             return c.html(`<span class="text-green-600" title="Rock ID: ${person.Id}">Exists ✓</span>`);
@@ -167,26 +172,32 @@ app.post('/process-rock-record-htmx', async (c) => {
     let statusHtml = '';
     let buttonText = 'Import';
     let buttonDisabled = false;
-    let rockPersonId: number | undefined;
+    let finalMessage = ''; // To give more context on action
 
     try {
         const existingRockPerson = await findPersonInRock(c.env, firstName, lastName, email);
         if (existingRockPerson) {
             await updatePersonAttributeInRock(c.env, existingRockPerson.Id);
-            rockPersonId = existingRockPerson.Id;
-            statusHtml = `<span class="text-purple-600" title="Rock ID: ${rockPersonId}">Updated ✓</span>`;
+            statusHtml = `<span class="text-purple-600" title="Rock ID: ${existingRockPerson.Id}">Updated ✓</span>`;
             buttonText = 'Updated';
+            finalMessage = `Attribute set for ID: ${existingRockPerson.Id}`;
             buttonDisabled = true;
         } else {
+            // Placeholder for creation logic if re-enabled
             // const newRockPerson = await createPersonInRock(c.env, firstName, lastName, email);
-            // rockPersonId = newRockPerson.Id;
-            // statusHtml = `<span class="text-green-700" title="Rock ID: ${rockPersonId}">Created ✓</span>`;
+            // statusHtml = `<span class="text-green-700" title="Rock ID: ${newRockPerson.Id}">Created ✓</span>`;
             // buttonText = 'Created';
+            // finalMessage = `New person created, ID: ${newRockPerson.Id}`;
             // buttonDisabled = true;
+            statusHtml = `<span class="text-orange-500">Not Found (Create not enabled)</span>`;
+            buttonText = 'Import (N/A)'; // Or keep as 'Import' and disable
+            finalMessage = 'Person not found. Creation logic is currently disabled in this example.';
+            // buttonDisabled = true; // Or false if you want them to be able to retry (though it won't do anything new)
         }
     } catch (e: any) {
         console.error("Error processing Rock record:", e);
         statusHtml = `<span class="text-red-600" title="${e.message}">Process Error!</span>`;
+        finalMessage = `Error: ${e.message}`;
         buttonText = 'Retry Import';
     }
 
@@ -196,7 +207,7 @@ app.post('/process-rock-record-htmx', async (c) => {
             <td class="py-2 px-3 border-b">{firstName}</td>
             <td class="py-2 px-3 border-b">{lastName}</td>
             <td class="py-2 px-3 border-b">{email}</td>
-            <td class="py-2 px-3 border-b rock-status-cell" id={`status-${id}`}>{statusHtml}</td>
+            <td class="py-2 px-3 border-b rock-status-cell" id={`status-${id}`}>{statusHtml} <em class="text-xs text-gray-500">{finalMessage}</em></td>
             <td class="py-2 px-3 border-b">
                 <button 
                     class={`px-3 py-1 text-white text-sm rounded ${buttonDisabled ? 'bg-gray-400' : 'bg-green-500 hover:bg-green-600'}`}
