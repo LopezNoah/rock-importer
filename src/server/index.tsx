@@ -14,46 +14,52 @@ interface MainLayoutProps {
 
 const LayoutScript = () => (
     raw`
-    // This script needs to run after HTMX might have swapped content.
-    // Using htmx.onLoad is a good way to re-apply observers.
     function observeTableRows() {
         const observerOptions = {
-            root: null, // relative to document viewport
-            rootMargin: '100px 0px 100px 0px', // trigger a bit before/after viewport
-            threshold: 0.01 // trigger if 1% is visible
+            root: null, 
+            rootMargin: '100px 0px 100px 0px', 
+            threshold: 0.01 
         };
 
         const observerCallback = (entries, observerInstance) => {
             entries.forEach(entry => {
                 if (entry.isIntersecting) {
-                    const targetCellSpan = entry.target.querySelector('.rock-status-cell > span[hx-trigger="revealed once"]');
-                    if (targetCellSpan) {
-                        if (targetCellSpan.hasAttribute('hx-trigger')) {
-                            htmx.trigger(targetCellSpan, 'revealed');
-                        }
+                    // Trigger for status check
+                    const statusSpan = entry.target.querySelector('.rock-status-cell > span[hx-trigger="revealed once"]');
+                    if (statusSpan && statusSpan.hasAttribute('hx-trigger')) { 
+                        htmx.trigger(statusSpan, 'revealed');
+                        // HTMX 'once' should handle not re-triggering. No need to remove attribute manually here.
                     }
-                    // No need to explicitly unobserve if hx-trigger="... once" is used effectively by HTMX.
+
+                    // Trigger for auto-processing in action cell
+                    const actionProcessSpan = entry.target.querySelector('.action-cell > span[hx-trigger="revealed once"]');
+                    if (actionProcessSpan && actionProcessSpan.hasAttribute('hx-trigger')) {
+                        htmx.trigger(actionProcessSpan, 'revealed');
+                    }
                 }
             });
         };
 
         const observer = new IntersectionObserver(observerCallback, observerOptions);
-        const targets = document.querySelectorAll('.htmx-observe-me'); // Class on <tr>
+        const targets = document.querySelectorAll('.htmx-observe-me'); 
         targets.forEach(target => observer.observe(target));
     }
     
+    // Initial call for already visible elements if any (though usually table is loaded by HTMX)
+    // observeTableRows(); // Might not be needed if table is always dynamically loaded
+
     document.body.addEventListener('htmx:afterSwap', function(event) {
+        // Check if the swapped content is the table container or part of it
         if (event.detail.target.id === 'table-container' || event.target.closest('#table-container')) {
             observeTableRows();
         }
     });
 
+    // afterSettle is also good for when content is added and settled.
     document.body.addEventListener('htmx:afterSettle', function(event) {
         const targetElement = event.detail.elt;
-        if (targetElement.classList.contains('htmx-observe-me') || (targetElement.parentElement && targetElement.parentElement.classList.contains('htmx-observe-me'))) {
-            // This ensures that if a single row is swapped and it needs observation, it gets it.
-            // With "revealed once", this might mainly apply if HTMX replaces an element that then needs re-observing.
-            // The observeTableRows() function re-queries all .htmx-observe-me, which is fine.
+        // If a row itself was swapped, or content inside importer-tbody
+        if (targetElement.classList.contains('htmx-observe-me') || targetElement.closest('#importer-tbody')) {
             observeTableRows(); 
         }
     });`
@@ -66,14 +72,13 @@ const MainLayout = (props: MainLayoutProps) => (
       <meta name="viewport" content="width=device-width, initial-scale=1.0" />
       <title>{props.title}</title>
       <script src="https://unpkg.com/htmx.org@1.9.10" integrity="sha384-D1Kt99CQMDuVetoL1lrYwg5t+9QdHe7NLX/SoJYkXDFfX37iInKRy5xLSi8nO7UC" crossOrigin="anonymous"></script>
-      {/* Using Tailwind CDN as in the original snippet for this HTMX page. 
-          If local styles via /src/style.css are preferred, ensure Vite build correctly places/links it for non-React pages. */}
       <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet" />
       <style>{`
           .htmx-indicator { display: none; }
           .htmx-request .htmx-indicator { display: inline; }
-          .htmx-settling td { opacity: 0.7; }
+          /* .htmx-settling td { opacity: 0.7; } */ /* Can make things look jumpy with auto-scroll actions */
           .sticky-header th { position: sticky; top: 0; z-index: 10; background-color: #f3f4f6 /* bg-gray-100 */; }
+          .action-cell .animate-spin, .rock-status-cell .animate-spin { margin-right: 0.5rem; }
       `}</style>
   </head>
   <body class="bg-gray-50 p-6 font-sans">
@@ -86,9 +91,9 @@ const MainLayout = (props: MainLayoutProps) => (
 // Serve the main HTML page using the layout
 app.get('/', (c) => {
     return c.html(
-        <MainLayout title="Rock RMS CSV Importer (HTMX)">
+        <MainLayout title="Rock RMS CSV Importer (HTMX Auto-Scroll)">
             <div class="container mx-auto max-w-4xl">
-                <h1 class="text-3xl font-bold mb-6 text-gray-800">Rock RMS CSV Importer (HTMX)</h1>
+                <h1 class="text-3xl font-bold mb-6 text-gray-800">Rock RMS CSV Importer (HTMX Auto-Scroll)</h1>
                 
                 <form 
                     hx-post="/api/upload-table" 
@@ -97,7 +102,7 @@ app.get('/', (c) => {
                     hx-encoding="multipart/form-data"
                     class="mb-8 p-6 bg-white border rounded-lg shadow"
                 >
-                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-4 mb-4">
                         <div>
                             <label for="firstNameHeader" class="block text-sm font-medium text-gray-700">First Name Header</label>
                             <input type="text" name="firstNameHeader" id="firstNameHeader" defaultValue="first_name" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" />
@@ -109,6 +114,16 @@ app.get('/', (c) => {
                         <div>
                             <label for="emailHeader" class="block text-sm font-medium text-gray-700">Email Header</label>
                             <input type="text" name="emailHeader" id="emailHeader" defaultValue="email" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" />
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-4 mb-4">
+                        <div>
+                            <label for="attributeKey" class="block text-sm font-medium text-gray-700">Attribute Key</label>
+                            <input type="text" name="attributeKey" id="attributeKey" defaultValue="ImportSource" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" />
+                        </div>
+                        <div>
+                            <label for="attributeValue" class="block text-sm font-medium text-gray-700">Attribute Value</label>
+                            <input type="text" name="attributeValue" id="attributeValue" defaultValue="CSVImport_UI_AutoScroll" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" />
                         </div>
                     </div>
 
