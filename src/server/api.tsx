@@ -2,7 +2,7 @@
 import { Hono } from 'hono';
 // Removed unused imports: stream, jsxRenderer
 import type { Env } from './rock-service';
-import { findPersonInRock, updatePersonAttributeInRock /* createPersonInRock */ } from './rock-service'; // Assuming createPersonInRock might be used later
+import { createPersonInRock, findPersonInRock, updatePersonAttributeInRock /* createPersonInRock */ } from './rock-service'; // Assuming createPersonInRock might be used later
 
 // CSV Row Data interface remains the same
 interface CsvRowData {
@@ -164,35 +164,41 @@ app.get('/check-row-status', async (c) => {
     }
 });
 
-
-// Endpoint to process a record and return the updated row HTML
 app.post('/process-rock-record-htmx', async (c) => {
-    const { id, firstName, lastName, email } = await c.req.parseBody() as { id: string, firstName: string, lastName: string, email: string };
-    
+    const {
+        id,
+        firstName,
+        lastName,
+        email,
+        attributeKey,
+        attributeValue
+    } = await c.req.parseBody() as {
+        id: string,
+        firstName: string,
+        lastName: string,
+        email: string,
+        attributeKey: string,
+        attributeValue: string
+    };
+
     let statusHtml = '';
     let buttonText = 'Import';
     let buttonDisabled = false;
-    let finalMessage = ''; // To give more context on action
+    let finalMessage = '';
 
     try {
         const existingRockPerson = await findPersonInRock(c.env, firstName, lastName, email);
         if (existingRockPerson) {
-            await updatePersonAttributeInRock(c.env, existingRockPerson.Id);
+            await updatePersonAttributeInRock(c.env, existingRockPerson.Id, attributeKey, attributeValue);
             statusHtml = `<span class="text-purple-600" title="Rock ID: ${existingRockPerson.Id}">Updated ✓</span>`;
             buttonText = 'Updated';
-            finalMessage = `Attribute set for ID: ${existingRockPerson.Id}`;
+            finalMessage = `Attribute '${attributeKey}' set to '${attributeValue}' for ID: ${existingRockPerson.Id}`;
             buttonDisabled = true;
         } else {
-            // Placeholder for creation logic if re-enabled
-            // const newRockPerson = await createPersonInRock(c.env, firstName, lastName, email);
-            // statusHtml = `<span class="text-green-700" title="Rock ID: ${newRockPerson.Id}">Created ✓</span>`;
-            // buttonText = 'Created';
-            // finalMessage = `New person created, ID: ${newRockPerson.Id}`;
-            // buttonDisabled = true;
             statusHtml = `<span class="text-orange-500">Not Found (Create not enabled)</span>`;
-            buttonText = 'Import (N/A)'; // Or keep as 'Import' and disable
-            finalMessage = 'Person not found. Creation logic is currently disabled in this example.';
-            // buttonDisabled = true; // Or false if you want them to be able to retry (though it won't do anything new)
+            buttonText = 'Import (N/A)';
+            await createPersonInRock(c.env, firstName, lastName, email);
+            finalMessage = 'Person not found. Creation logic is currently disabled.';
         }
     } catch (e: any) {
         console.error("Error processing Rock record:", e);
@@ -201,7 +207,6 @@ app.post('/process-rock-record-htmx', async (c) => {
         buttonText = 'Retry Import';
     }
 
-    // Return the entire updated row
     return c.html(
         <tr id={id} class={`hover:bg-gray-50 ${buttonDisabled ? 'bg-green-50' : ''} htmx-observe-me`}>
             <td class="py-2 px-3 border-b">{firstName}</td>
@@ -212,7 +217,14 @@ app.post('/process-rock-record-htmx', async (c) => {
                 <button 
                     class={`px-3 py-1 text-white text-sm rounded ${buttonDisabled ? 'bg-gray-400' : 'bg-green-500 hover:bg-green-600'}`}
                     hx-post="/api/process-rock-record-htmx"
-                    hx-vals={`{ "id": "${id}", "firstName": "${firstName}", "lastName": "${lastName}", "email": "${email}" }`}
+                    hx-vals={`{
+                        "id": "${id}",
+                        "firstName": "${firstName}",
+                        "lastName": "${lastName}",
+                        "email": "${email}",
+                        "attributeKey": "${attributeKey}",
+                        "attributeValue": "${attributeValue}"
+                    }`}
                     hx-target={`#${id}`}
                     hx-swap="outerHTML"
                     disabled={buttonDisabled}

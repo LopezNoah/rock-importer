@@ -47,69 +47,79 @@ export async function findPersonInRock(env: Env, firstName: string, lastName: st
     return people.length > 0 ? people[0] : null;
 }
 
-// export async function createPersonInRock(env: Env, firstName: string, lastName: string, email: string): Promise<RockPerson> {
-//     const personData: Partial<RockPerson> & { RecordStatusValueId?: number, ConnectionStatusValueId?: number } = {
-//         FirstName: firstName,
-//         LastName: lastName,
-//         Email: email,
-//         RecordStatusValueId: 1, // Active
-//         IsEmailActive: true,
-//         EmailPreference: 0, // EmailAllowed
-//         // ConnectionStatusValueId: 55, // Example: Web Prospect
-//         AttributeValues: {
-//             [env.ROCK_PERSON_ATTRIBUTE_KEY]: { Value: env.ROCK_PERSON_ATTRIBUTE_VALUE }
-//         }
-//     };
-
-//     const response = await rockFetch(env, 'People', {
-//         method: 'POST',
-//         body: JSON.stringify(personData)
-//     });
-
-//     if (response.status === 201 || response.status === 200) {
-//         const responseText = await response.text();
-//         let newPersonId: number;
-//         try {
-//             newPersonId = parseInt(responseText, 10);
-//             if (isNaN(newPersonId)) {
-//                  const jsonResponse = JSON.parse(responseText);
-//                  newPersonId = jsonResponse.Id || jsonResponse.id;
-//             }
-//         } catch (e) {
-//             throw new Error('Failed to parse ID from Rock person creation response.');
-//         }
-        
-//         if (!newPersonId || isNaN(newPersonId)) {
-//              throw new Error('No ID returned from Rock person creation.');
-//         }
-
-//         const getResponse = await rockFetch(env, `People/${newPersonId}`);
-//         if (!getResponse.ok) {
-//             console.error(`Rock API Error (fetch created Person): ${getResponse.status} ${await getResponse.text()}`);
-//             throw new Error('Failed to fetch newly created person from Rock.');
-//         }
-//         return await getResponse.json();
-//     } else {
-//         const errorBody = await response.text();
-//         console.error(`Rock API Error (createPerson): ${response.status} ${errorBody}`);
-//         throw new Error(`Rock API Error (createPerson): ${response.status} - ${errorBody}`);
-//     }
-// }
-
-export async function updatePersonAttributeInRock(env: Env, personId: number): Promise<void> {
-    const personUpdateData = {
-        AttributeValues: {
-            [env.ROCK_PERSON_ATTRIBUTE_KEY]: { Value: env.ROCK_PERSON_ATTRIBUTE_VALUE }
-        }
+export async function createPersonInRock(env: Env, firstName: string, lastName: string, email: string): Promise<void> {
+    const personData = 
+    {
+        FirstName: firstName,
+        LastName: lastName,
+        NickName: firstName,
+        Email: email,
+        Gender: 0,
+        IsDeceased: false,
+        EmailPreference: 0,
+        RecordTypeValueId: 1,
+        CommunicationPreference: 1,
+        AgeClassification: 0,
+        IsLockedAsChild: false,
+        AccountProtectionProfile: 0,
+        IsSystem: false,
     };
-    const response = await rockFetch(env, `People/${personId}`, {
-        method: 'PATCH',
-        body: JSON.stringify(personUpdateData)
-    });
+    console.log(JSON.stringify(personData));
 
-    if (!response.ok) {
+    const response = await rockFetch(env, 'People', {
+        method: 'POST',
+        body: JSON.stringify(personData)
+    });
+    console.log(response.status);
+    console.log(await response.text());
+
+    if (response.status === 201 || response.status === 200) {
+        const responseText = await response.text();
+        let newPersonId: number;
+        try {
+            newPersonId = parseInt(responseText, 10);
+            if (isNaN(newPersonId)) {
+                 const jsonResponse = JSON.parse(responseText);
+                 newPersonId = jsonResponse.Id || jsonResponse.id;
+            }
+        } catch (e) {
+            throw new Error('Failed to parse ID from Rock person creation response.');
+        }
+        
+        if (!newPersonId || isNaN(newPersonId)) {
+             throw new Error('No ID returned from Rock person creation.');
+        }
+
+        const getResponse = await rockFetch(env, `People/${newPersonId}`);
+        const updatePersonAttribute = await updatePersonAttributeInRock(env, newPersonId, 'ImportedFrom', 'CSV_Import_2025_05_14')
+        if (!getResponse.ok) {
+            console.error(`Rock API Error (fetch created Person): ${getResponse.status} ${await getResponse.text()}`);
+            throw new Error('Failed to fetch newly created person from Rock.');
+        }
+        return await getResponse.json();
+    } else {
         const errorBody = await response.text();
-        console.error(`Rock API Error (updatePersonAttribute): ${response.status} ${errorBody}`);
-        throw new Error(`Rock API Error (updatePersonAttribute): ${response.status} - ${errorBody}`);
+        console.error(`Rock API Error (createPerson): ${response.status} ${errorBody}`);
+        throw new Error(`Rock API Error (createPerson): ${response.status} - ${errorBody}`);
     }
+}
+
+export async function updatePersonAttributeInRock(
+    env: Env,
+    personId: number,
+    attributeKey: string,
+    attributeValue: string
+): Promise<void> {
+    const url = `People/AttributeValue/${personId}?attributeKey=${encodeURIComponent(attributeKey)}&attributeValue=${encodeURIComponent(attributeValue)}`;
+
+    // const response = await rockFetch(env, url, {
+    //     method: 'POST'
+    // });
+
+    console.log(`Updated person attribute: ${ personId }`);
+    // if (!response.ok) {
+    //     const errorBody = await response.text();
+    //     console.error(`Rock API Error (updatePersonAttribute): ${response.status} ${errorBody}`);
+    //     throw new Error(`Rock API Error (updatePersonAttribute): ${response.status} - ${errorBody}`);
+    // }
 }
